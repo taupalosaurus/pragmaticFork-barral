@@ -138,7 +138,7 @@ public:
         size_t origNElements = _mesh->get_number_elements();
         size_t origNNodes = _mesh->get_number_nodes();
         size_t edgeSplitCnt = 0;
-
+    
         #pragma omp parallel
         {
             #pragma omp single nowait
@@ -374,6 +374,7 @@ public:
                 }
             }
 
+
             // Update halo.
             if(nprocs>1) {
                 #pragma omp single
@@ -383,6 +384,9 @@ public:
                     for(size_t i=0; i<edgeSplitCnt; ++i)
                     {
                         DirectedEdge<index_t> *vert = &allNewVertices[i];
+                        
+                        printf("DEBUG(%d)    edge split: %d %d   id: %d   owner: %d\n", 
+                               rank, vert->edge.first, vert->edge.second, vert->id, _mesh->node_owner[vert->id]);
 
                         if(_mesh->node_owner[vert->id] != rank) {
                             // Vertex is owned by another MPI process, so prepare to update recv and recv_halo.
@@ -402,11 +406,19 @@ public:
                             // The latter is true only if both vertices of the original edge were halo vertices.
                             if(_mesh->is_halo_node(vert->edge.first) && _mesh->is_halo_node(vert->edge.second)) {
                                 // Find which processes see this vertex
+                                printf("DEBUG(%d)     I am a halo vertex\n",rank);
                                 std::set<int> processes;
-                                for(typename std::vector<index_t>::const_iterator neigh=_mesh->NNList[vert->id].begin(); neigh!=_mesh->NNList[vert->id].end(); ++neigh)
+                                for(typename std::vector<index_t>::const_iterator neigh=_mesh->NNList[vert->id].begin(); neigh!=_mesh->NNList[vert->id].end(); ++neigh) {
+                                    const double * coords = _mesh->get_coords(*neigh);
+                                    printf("DEBUG(%d)       neighbor:  %d, coords: %1.2f %1.2f   owned by: %d\n",
+                                            rank, *neigh, coords[0], coords[1], _mesh->node_owner[*neigh]);
                                     processes.insert(_mesh->node_owner[*neigh]);
+                                }
 
                                 processes.erase(rank);
+                                
+                                if (processes.size() > 0) { exit(23);printf("DEBUG(%d)     neighbor processes[0]: %d\n",rank,*processes.begin());}
+                                else printf("DEBUG(%d)     neighbor processes list is empty\n",rank);
 
                                 for(typename std::set<int>::const_iterator proc=processes.begin(); proc!=processes.end(); ++proc) {
                                     DirectedEdge<index_t> gnn_edge(_mesh->lnn2gnn[vert->edge.first], _mesh->lnn2gnn[vert->edge.second], vert->id);
@@ -434,6 +446,9 @@ public:
                             _mesh->send_halo.insert(it->id);
                         }
                     }
+                    
+                    printf("DEBUG(%d)  recv_cnt: %d %d   send_cnt: %d %d\n", rank, recv_cnt[0], recv_cnt[1],send_cnt[0],send_cnt[1]);
+
 
                     // Additional code for centroidal vertices.
                     if(dim==3)
@@ -453,8 +468,16 @@ public:
                         }
                     }
 
+                    MPI_Barrier(MPI_COMM_WORLD);
+                    exit(37);
+
+                    _mesh->print_halo("Before refine update_gappy_global_numbering");
+
                     // Update global numbering
                     _mesh->update_gappy_global_numbering(recv_cnt, send_cnt);
+                    
+                    MPI_Barrier(MPI_COMM_WORLD);
+                    exit(35);
 
                     // Now that the global numbering has been updated, update send_map and recv_map.
                     for(int i=0; i<nprocs; ++i)
@@ -481,6 +504,9 @@ public:
                     _mesh->trim_halo();
                 }
             }
+            
+            MPI_Barrier(MPI_COMM_WORLD);
+            exit(36);
 
 #if !defined NDEBUG
             if(dim==2) {

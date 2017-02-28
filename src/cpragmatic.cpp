@@ -100,13 +100,15 @@ extern "C" {
       @param [in] mpi_comm is the mpi comm.
       */
     void pragmatic_2d_mpi_init(const int *NNodes, const int *NElements, const int *enlist, const double *x, const double *y,
-                               const index_t *lnn2gnn, const index_t *NPNodes, MPI_Comm mpi_comm)
+                               const index_t *lnn2gnn, const int NPNodes, MPI_Comm mpi_comm)
     {
         if(_pragmatic_mesh!=NULL) {
             throw new std::string("PRAgMaTIc: only one mesh can be adapted at a time");
         }
+        
+        printf("DEBUG  *****  NPNodes: %d\n", NPNodes);
 
-        Mesh<double> *mesh = new Mesh<double>(*NNodes, *NElements, enlist, x, y, lnn2gnn, *NPNodes, mpi_comm);
+        Mesh<double> *mesh = new Mesh<double>(*NNodes, *NElements, enlist, x, y, lnn2gnn, NPNodes, mpi_comm);
 
         _pragmatic_mesh = mesh;
     }
@@ -148,12 +150,12 @@ extern "C" {
 
       */
     void pragmatic_3d_mpi_init(const int *NNodes, const int *NElements, const int *enlist, const double *x, const double *y, const double *z,
-                           const index_t *lnn2gnn, const index_t *NPNodes, MPI_Comm mpi_comm)
+                           const index_t *lnn2gnn, const int NPNodes, MPI_Comm mpi_comm)
     {
         assert(_pragmatic_mesh==NULL);
         assert(_pragmatic_metric_field==NULL);
-
-        Mesh<double> *mesh = new Mesh<double>(*NNodes, *NElements, enlist, x, y, z, lnn2gnn, *NPNodes, mpi_comm);
+        
+        Mesh<double> *mesh = new Mesh<double>(*NNodes, *NElements, enlist, x, y, z, lnn2gnn, NPNodes, mpi_comm);
 
         _pragmatic_mesh = mesh;
     }
@@ -235,6 +237,10 @@ extern "C" {
             ((MetricField<double,3> *)_pragmatic_metric_field)->set_metric_full(metric);
             ((MetricField<double,3> *)_pragmatic_metric_field)->update_mesh();
         }
+        
+//         for (int iVer=0; iVer<mesh->get_number_nodes(); ++iVer){
+//            printf("DEBUG(%d)  (set_metric) lnn2gnn[%d] : %d\n", mesh->get_rank(), iVer, mesh->get_globalNodeNumbering(iVer));
+//        }
     }
 
     /** Set the domain boundary.
@@ -249,6 +255,10 @@ extern "C" {
 
         Mesh<double> *mesh = (Mesh<double> *)_pragmatic_mesh;
         mesh->set_boundary(*nfacets, facets, ids);
+        
+//         for (int iVer=0; iVer<mesh->get_number_nodes(); ++iVer){
+//            printf("DEBUG(%d)  (Set_bdry) lnn2gnn[%d] : %d\n", mesh->get_rank(), iVer, mesh->get_globalNodeNumbering(iVer));
+//        }
     }
 
     /** Adapt the mesh.
@@ -258,7 +268,29 @@ extern "C" {
         Mesh<double> *mesh = (Mesh<double> *)_pragmatic_mesh;
 
         const size_t ndims = mesh->get_number_dimensions();
-
+        
+        //---- DEBUG prints
+        int rank = mesh->get_rank();
+        
+        for (int iVer=0; iVer<mesh->get_number_nodes(); ++iVer){
+          const double * coords = mesh->get_coords(iVer);
+          printf("DEBUG(%d)  vertex[%d (%d)]  %1.2f %1.2f\n", rank, iVer, mesh->get_globalNodeNumbering(iVer), coords[0], coords[1]);
+        }
+        
+        for (int iTri=0; iTri<mesh->get_number_elements(); ++iTri){
+            const int * tri = mesh->get_element(iTri);
+            printf("DEBUG(%d)  triangle[%d]  %d %d %d\n", rank, iTri, tri[0], tri[1], tri[2]);
+        }
+        
+        for (int iVer=0; iVer<mesh->get_number_nodes(); ++iVer){
+            const double * met = mesh->get_metric(iVer);
+            printf("DEBUG(%d)  metric[%d]  %1.2f %1.2f %1.2f\n", rank, iVer, met[0], met[1], met[2]);
+        }
+        
+//        MPI_Barrier(MPI_COMM_WORLD);
+//        exit(34);
+        //------- End DEBUG
+        
         // See Eqn 7; X Li et al, Comp Methods Appl Mech Engrg 194 (2005) 4915-4950
         double L_up = sqrt(2.0);
         double L_low = L_up*0.5;
@@ -275,9 +307,27 @@ extern "C" {
             for(size_t i=0; i<20; i++) {
                 double L_ref = std::max(alpha*L_max, L_up);
 
-                coarsen.coarsen(L_low, L_ref, (bool) coarsen_surface);
-                swapping.swap(0.7);
+//                coarsen.coarsen(L_low, L_ref, (bool) coarsen_surface);
+//                swapping.swap(0.7);
+
+//                for (int iVer=0; iVer<mesh->get_number_nodes(); ++iVer){
+//                  const double * coords = mesh->get_coords(iVer);
+//                  printf("DEBUG(%d) _AS_  vertex[%d (%d)]  %1.2f %1.2f\n", rank, iVer, mesh->get_globalNodeNumbering(iVer), coords[0], coords[1]);
+//                }
+//
+//                for (int iTri=0; iTri<mesh->get_number_elements(); ++iTri){
+//                    const int * tri = mesh->get_element(iTri);
+//                    printf("DEBUG(%d) _AS_  triangle[%d]  %d %d %d\n", rank, iTri, tri[0], tri[1], tri[2]);
+//                }
+//
+//                for (int iVer=0; iVer<mesh->get_number_nodes(); ++iVer){
+//                    const double * met = mesh->get_metric(iVer);
+//                    printf("DEBUG(%d) _AS_  metric[%d]  %1.2f %1.2f %1.2f\n", rank, iVer, met[0], met[1], met[2]);
+//                }
+              
                 refine.refine(L_ref);
+                MPI_Barrier(MPI_COMM_WORLD);
+                exit(34);
 
                 L_max = mesh->maximal_edge_length();
 

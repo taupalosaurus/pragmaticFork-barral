@@ -61,6 +61,8 @@ void halo_update(MPI_Comm comm,
     MPI_Comm_rank(comm, &rank);
 
     mpi_type_wrapper<DATATYPE> wrap;
+    
+//    printf("DEBUG(%d)  begin halo_update\n", rank);
 
     // MPI_Requests for all non-blocking communications.
     std::vector<MPI_Request> request(num_processes*2);
@@ -93,12 +95,18 @@ void halo_update(MPI_Comm comm,
     std::vector<MPI_Status> status(num_processes*2);
     MPI_Waitall(num_processes, &(request[0]), &(status[0]));
     MPI_Waitall(num_processes, &(request[num_processes]), &(status[num_processes]));
-
+    
     for(int i=0; i<num_processes; i++) {
         int k=0;
-        for(typename std::vector<index_t>::const_iterator it=recv[i].begin(); it!=recv[i].end(); ++it, ++k)
-            for(int j=0; j<block; j++)
+//        if (block ==3) printf("DEBUG(%d)    i: %d, recv[i].size() %d\n", rank, i, recv[i].size());
+        for(typename std::vector<index_t>::const_iterator it=recv[i].begin(); it!=recv[i].end(); ++it, ++k) {
+//            if (block ==3) printf("DEBUG(%d)      k: %d\n", rank, k);
+            for(int j=0; j<block; j++) {
+//                if (block ==3) printf("DEBUG(%d)        j: %d\n", rank, j);
                 vec[(*it)*block+j] = recv_buff[i][k*block+j];
+//                if (block ==3) printf("DEBUG(%d)  i: %d  k: %d  j: %d   vec[(*it)*block+j]: %f\n", rank, i,k,j, vec[(*it)*block+j]);
+            }
+        }
     }
 
     return;

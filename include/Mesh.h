@@ -441,7 +441,17 @@ public:
     /// Return the array of boundary facets and associated tags
     inline  int * get_boundaryTags() 
     {
-      return boundary.data();
+        return boundary.data();
+    }
+    
+    inline int get_rank()
+    {
+        return rank;
+    }
+    
+    inline int get_globalNodeNumbering(index_t nid) 
+    {
+        return lnn2gnn[nid];
     }
 
     /// Returns true if the node is in any of the partitioned elements.
@@ -1436,6 +1446,7 @@ private:
 #else
         std::map<index_t, index_t> gnn2lnn;
 #endif
+
         if(num_processes>1) {
             assert(lnn2gnn!=NULL);
             for(size_t i=0; i<(size_t)NNodes; i++) {
@@ -1448,6 +1459,8 @@ private:
             for(int i=1;i<=num_processes;i++) {
                 owner_range[i]+=owner_range[i-1];
             }
+            printf("DEBUG(%d)  NPNodes: %d, owner_range: %d %d %d\n", rank, NPNodes, owner_range[0], owner_range[1], owner_range[2]);
+            
             std::vector< std::set<index_t> > recv_set(num_processes);
             for(size_t i=0; i<(size_t)NElements*nloc; i++) {
                 index_t lnn = ENList[i];
@@ -1516,6 +1529,8 @@ private:
             }
 
         }
+
+
 
         _ENList.resize(NElements*nloc);
         quality.resize(NElements);
@@ -1618,9 +1633,71 @@ private:
         }
 
         create_adjacency();
+        
+        
+//        for (int iVer; iVer<NNodes; ++iVer){
+//            printf("DEBUG(%d)  Before this->lnn2gnn[%d] : %d,    lnn2gnn : %d\n", rank, iVer, this->lnn2gnn[iVer], lnn2gnn[iVer]);
+//        }
 	    
         create_global_node_numbering();
+
+        print_halo("End of Mesh::_init");
+        
+//        for (int iVer; iVer<NNodes; ++iVer){
+//            printf("DEBUG(%d)  After this->lnn2gnn[%d] : %d,    lnn2gnn : %d\n", rank, iVer, this->lnn2gnn[iVer], lnn2gnn[iVer]);
+//        }
     }
+
+
+    /// print halo related structures
+    void print_halo(char * text) 
+    {
+
+        printf("DEBUG(%d)  %s\n", rank, text);
+        printf("DEBUG(%d)  recv:\n", rank);
+        for (int i=0; i<recv.size(); ++i) {
+            printf("DEBUG(%d)       [%d]", rank, i);
+            for (int j=0; j<recv[i].size(); ++j) printf("  %d", recv[i][j]);
+            printf("\n");
+        }
+        printf("DEBUG(%d)  send:\n", rank);
+        for (int i=0; i<send.size(); ++i) {
+            printf("DEBUG(%d)       [%d]", rank, i);
+            for (int j=0; j<send[i].size(); ++j) printf("  %d", send[i][j]);
+            printf("\n");
+        }
+        printf("DEBUG(%d)  recv_map:\n", rank);
+        for (int i=0; i<recv_map.size(); ++i){
+            printf("DEBUG(%d)           [%d]", rank, i);
+            for (std::map<index_t,index_t>::const_iterator it=recv_map[i].begin(); it!=recv_map[i].end(); ++it)
+                printf("  %d->%d", it->first, it->second);
+            printf("\n");
+        }
+        printf("DEBUG(%d)  send_map:\n", rank);
+        for (int i=0; i<send_map.size(); ++i){
+            printf("DEBUG(%d)           [%d]", rank, i);
+            for (std::map<index_t,index_t>::const_iterator it=send_map[i].begin(); it!=send_map[i].end(); ++it)
+                printf("  %d->%d", it->first, it->second);
+            printf("\n");
+        }
+        printf("DEBUG(%d)  recv_halo:\n", rank);
+        printf("DEBUG(%d)            ", rank);
+        for (std::set<index_t>::const_iterator it=recv_halo.begin(); it!=recv_halo.end(); ++it)
+            printf("  %d", *it);
+        printf("\n");
+        printf("DEBUG(%d)  send_halo:\n", rank);
+        printf("DEBUG(%d)            ", rank);
+        for (std::set<index_t>::const_iterator it=send_halo.begin(); it!=send_halo.end(); ++it)
+            printf("  %d", *it);
+        printf("\n");
+        printf("DEBUG(%d)  node_owner:\n", rank);
+        printf("DEBUG(%d)             ", rank);
+        for (int i=0; i<node_owner.size();++i)
+            printf("  %d->%d", i, node_owner[i]);
+        printf("\n");
+
+    }
+
 
     /// Create required adjacency lists.
     void create_adjacency()
@@ -1855,6 +1932,8 @@ private:
     {
         // MPI_Requests for all non-blocking communications.
         std::vector<MPI_Request> request(num_processes*2);
+        
+        printf("DEBUG(%d)  recv_cnt: %d %d    send_cnt: %d %d\n", get_rank(), recv_cnt[0], recv_cnt[1], send_cnt[0], send_cnt[1]);
 
         // Setup non-blocking receives.
         std::vector< std::vector<index_t> > recv_buff(num_processes);
@@ -1881,8 +1960,21 @@ private:
         }
 
         std::vector<MPI_Status> status(num_processes*2);
-        MPI_Waitall(num_processes, &(request[0]), &(status[0]));
-        MPI_Waitall(num_processes, &(request[num_processes]), &(status[num_processes]));
+        int rank = get_rank();
+        if (rank == 0) {
+            MPI_Wait(&request[0], &status[0]);
+//            MPI_Wait(&request[1], &status[1]);
+            MPI_Wait(&request[2], &status[2]);
+            MPI_Wait(&request[3], &status[3]);
+        }
+        if (rank == 1) {
+            MPI_Wait(&request[0], &status[0]);
+            MPI_Wait(&request[1], &status[1]);
+            MPI_Wait(&request[2], &status[2]);
+            MPI_Wait(&request[3], &status[3]);
+        }
+//        MPI_Waitall(num_processes, &(request[0]), &(status[0]));        
+//        MPI_Waitall(num_processes, &(request[num_processes]), &(status[num_processes]));
 
         for(int i=0; i<num_processes; i++) {
             int k=0;
