@@ -916,8 +916,14 @@ public:
       coarsened. */
     void defragment()
     {
+
+        MPI_Barrier(MPI_COMM_WORLD);
+        exit(22);
         // Discover which vertices and elements are active.
         std::vector<index_t> active_vertex_map(NNodes);
+
+        MPI_Barrier(MPI_COMM_WORLD);
+        exit(23);
 
         #pragma omp parallel for schedule(static)
         for(size_t i=0; i<NNodes; i++) {
@@ -930,6 +936,9 @@ public:
         std::vector<index_t> active_element;
 
         active_element.reserve(NElements);
+
+        MPI_Barrier(MPI_COMM_WORLD);
+        exit(24);
 
         std::map<index_t, std::set<int> > new_send_set, new_recv_set;
         for(size_t e=0; e<NElements; e++) {
@@ -987,6 +996,9 @@ public:
             active_vertex_map[i] = cnt++;
         }
 
+        MPI_Barrier(MPI_COMM_WORLD);
+        exit(25);
+
         // Renumber elements
         int active_nelements = active_element.size();
         std::map< std::set<index_t>, index_t > ordered_elements;
@@ -1021,6 +1033,9 @@ public:
         std::vector<double> defrag_metric(NNodes*msize);
         std::vector<int> defrag_boundary(NElements*nloc);
         std::vector<double> defrag_quality(NElements);
+
+        MPI_Barrier(MPI_COMM_WORLD);
+        exit(26);
 
         // This first touch is to bind memory locally.
         #pragma omp parallel
@@ -1068,6 +1083,9 @@ public:
         memcpy(&quality[0], &defrag_quality[0], NElements*sizeof(double));
         memcpy(&_coords[0], &defrag_coords[0], NNodes*ndims*sizeof(real_t));
         memcpy(&metric[0], &defrag_metric[0], NNodes*msize*sizeof(double));
+
+        MPI_Barrier(MPI_COMM_WORLD);
+        exit(27);
 
         // Renumber halo, fix lnn2gnn and node_owner.
         if(num_processes>1) {
@@ -1525,11 +1543,17 @@ private:
                     index_t lnn = gnn2lnn[gnn];
                     send_map[j][gnn] = lnn;
                     send[j][k] = lnn;
+                    std::map<index_t, std::set<int>>::iterator it=halo_shared.find(lnn);
+                    if (it != halo_shared.end()) 
+                        it->second.insert(j);
+                    else {
+                        std::set<int> procs({j});
+                        halo_shared[lnn] = procs;
+                    }
                 }
             }
 
         }
-
 
 
         _ENList.resize(NElements*nloc);
@@ -1641,11 +1665,13 @@ private:
 	    
         create_global_node_numbering();
 
-        print_halo("End of Mesh::_init");
+
+//        print_halo("End of Mesh::_init");
         
 //        for (int iVer; iVer<NNodes; ++iVer){
 //            printf("DEBUG(%d)  After this->lnn2gnn[%d] : %d,    lnn2gnn : %d\n", rank, iVer, this->lnn2gnn[iVer], lnn2gnn[iVer]);
 //        }
+
     }
 
 
@@ -1695,6 +1721,13 @@ private:
         for (int i=0; i<node_owner.size();++i)
             printf("  %d->%d", i, node_owner[i]);
         printf("\n");
+        printf("DEBUG(%d)  halo_shared:\n", rank);
+        for (std::map<index_t,std::set<int>>::const_iterator it=halo_shared.begin(); it!=halo_shared.end(); ++it){
+            printf("DEBUG(%d)           %d ->", rank, it->first);
+            for (std::set<int>::const_iterator it2=it->second.begin(); it2!=it->second.end(); ++it2)
+                printf("  %d", *it2);
+            printf("\n");
+        }
 
     }
 
@@ -1740,12 +1773,18 @@ private:
         }
     }
 
+
+
+
+
+
     void trim_halo()
     {
         std::set<index_t> recv_halo_temp, send_halo_temp;
 
         // Traverse all vertices V in all recv[i] vectors. Vertices in send[i] belong by definition to *this* MPI process,
         // so all elements adjacent to them either belong exclusively to *this* process or cross partitions.
+        // TODO somewheer update halo_shared...
         for(int i=0; i<num_processes; i++) {
             if(recv[i].size()==0)
                 continue;
@@ -1861,6 +1900,13 @@ private:
         send_halo.swap(send_halo_temp);
     }
 
+
+
+
+
+
+
+
     void create_global_node_numbering()
     {
         if(num_processes>1) {
@@ -1960,10 +2006,10 @@ private:
         }
 
         std::vector<MPI_Status> status(num_processes*2);
-        int rank = get_rank();
+/*        int rank = get_rank();
         if (rank == 0) {
             MPI_Wait(&request[0], &status[0]);
-//            MPI_Wait(&request[1], &status[1]);
+            MPI_Wait(&request[1], &status[1]);
             MPI_Wait(&request[2], &status[2]);
             MPI_Wait(&request[3], &status[3]);
         }
@@ -1973,8 +2019,9 @@ private:
             MPI_Wait(&request[2], &status[2]);
             MPI_Wait(&request[3], &status[3]);
         }
-//        MPI_Waitall(num_processes, &(request[0]), &(status[0]));        
-//        MPI_Waitall(num_processes, &(request[num_processes]), &(status[num_processes]));
+*/
+        MPI_Waitall(num_processes, &(request[0]), &(status[0]));        
+        MPI_Waitall(num_processes, &(request[num_processes]), &(status[num_processes]));
 
         for(int i=0; i<num_processes; i++) {
             int k=0;
@@ -2055,6 +2102,8 @@ private:
     std::set<index_t> send_halo, recv_halo;
     std::vector<int> node_owner;
     std::vector<index_t> lnn2gnn;
+
+    std::map<index_t, std::set<int>> halo_shared; // Contains the list of procs on which halos vertices are shared
 
     index_t gnn_offset;
     MPI_Comm _mpi_comm;

@@ -133,12 +133,12 @@ public:
      * three-dimensional unstructured grids", Applied Numerical
      * Mathematics, Volume 13, Issue 6, February 1994, Pages 437-452.
      */
-    void refine(real_t L_max)
+    void refine(real_t L_max, int iter)
     {
         size_t origNElements = _mesh->get_number_elements();
         size_t origNNodes = _mesh->get_number_nodes();
         size_t edgeSplitCnt = 0;
-    
+
         #pragma omp parallel
         {
             #pragma omp single nowait
@@ -204,6 +204,7 @@ public:
                 edgeSplitCnt = _mesh->NNodes - origNNodes;
             }
 
+
             // Append new coords and metric to the mesh.
             memcpy(&_mesh->_coords[dim*threadIdx[tid]], &newCoords[tid][0], dim*splitCnt[tid]*sizeof(real_t));
             memcpy(&_mesh->metric[msize*threadIdx[tid]], &newMetric[tid][0], msize*splitCnt[tid]*sizeof(double));
@@ -222,6 +223,9 @@ public:
             #pragma omp barrier
             #pragma omp for schedule(guided)
             for(size_t i=0; i<edgeSplitCnt; ++i) {
+
+//                printf("DEBUG(%d) edgeSplitCnt: %d/%d\n", rank, i,edgeSplitCnt);
+
                 index_t vid = allNewVertices[i].id;
                 index_t firstid = allNewVertices[i].edge.first;
                 index_t secondid = allNewVertices[i].edge.second;
@@ -238,11 +242,20 @@ public:
                     new_vertices_per_element[nedge*eid+edgeOffset] = vid;
                 }
 
+//                if (iter>0) {
+//                    printf("DEBUG(%d) first-scnd id: %d %d  vid: %d _mesh_>NNList[vid]: %p   NNlist.size: %d\n", 
+//                        rank, firstid, secondid, vid, &_mesh->NNList[vid], _mesh->NNList.size());
+//                }
+
+
                 /*
                  * Update NNList for newly created vertices. This has to be done here, it cannot be
                  * done during element refinement, because a split edge is shared between two elements
                  * and we run the risk that these updates will happen twice, once for each element.
                  */
+                //if (iter > 0 && i>1 && i<6 && rank == 0) continue ;
+//                _mesh->NNList[vid].reserve(1);
+                //if (iter > 0 && i>6 && rank == 1) continue ;
                 _mesh->NNList[vid].push_back(firstid);
                 _mesh->NNList[vid].push_back(secondid);
 
@@ -272,6 +285,7 @@ public:
                         _mesh->lnn2gnn[vid] = _mesh->gnn_offset+vid;
                 }
             }
+
 
             if(dim==3) {
                 // If in 3D, we need to refine facets first.
@@ -321,6 +335,8 @@ public:
                     }
                 }
             }
+
+
 
             // Start element refinement.
             splitCnt[tid] = 0;
@@ -408,25 +424,35 @@ public:
                                 // Find which processes see this vertex
                                 printf("DEBUG(%d)     I am a halo vertex\n",rank);
                                 std::set<int> processes;
-                                for(typename std::vector<index_t>::const_iterator neigh=_mesh->NNList[vert->id].begin(); neigh!=_mesh->NNList[vert->id].end(); ++neigh) {
-                                    const double * coords = _mesh->get_coords(*neigh);
-                                    printf("DEBUG(%d)       neighbor:  %d, coords: %1.2f %1.2f   owned by: %d\n",
-                                            rank, *neigh, coords[0], coords[1], _mesh->node_owner[*neigh]);
-                                    processes.insert(_mesh->node_owner[*neigh]);
-                                }
+                                //for(typename std::vector<index_t>::const_iterator neigh=_mesh->NNList[vert->id].begin(); neigh!=_mesh->NNList[vert->id].end(); ++neigh) {
+                                //    const double * coords = _mesh->get_coords(*neigh);
+                                //    printf("DEBUG(%d)       neighbor:  %d, coords: %1.2f %1.2f   owned by: %d\n",
+                                //            rank, *neigh, coords[0], coords[1], _mesh->node_owner[*neigh]);
+                                //    processes.insert(_mesh->node_owner[*neigh]);
+                                //}
+                                std::set_intersection(_mesh->halo_shared[vert->edge.first].begin(), _mesh->halo_shared[vert->edge.first].end(),
+                                                      _mesh->halo_shared[vert->edge.second].begin(), _mesh->halo_shared[vert->edge.second].end(), 
+                                                      std::inserter(processes, processes.begin()));
 
                                 processes.erase(rank);
                                 
-                                if (processes.size() > 0) { exit(23);printf("DEBUG(%d)     neighbor processes[0]: %d\n",rank,*processes.begin());}
+                                assert(!processes.empty());
+
+                                if (processes.size() > 0) {printf("DEBUG(%d)     neighbor processes[0]: %d\n",rank,*processes.begin());}
                                 else printf("DEBUG(%d)     neighbor processes list is empty\n",rank);
 
                                 for(typename std::set<int>::const_iterator proc=processes.begin(); proc!=processes.end(); ++proc) {
                                     DirectedEdge<index_t> gnn_edge(_mesh->lnn2gnn[vert->edge.first], _mesh->lnn2gnn[vert->edge.second], vert->id);
                                     send_additional[*proc].insert(gnn_edge);
                                 }
+                                _mesh->halo_shared[vert->id] = processes;
                             }
                         }
                     }
+
+                    if (iter > 0) printf("DEBUG(%d)  send_additional.size(): %d  send_additional[1/2].size(): %d %d\n\n", rank,
+                                  send_additional.size(), send_additional[0].size(), send_additional[1].size());
+
 
                     // Append vertices in recv_additional and send_additional to recv and send.
                     // Mark how many vertices are added to each of these vectors.
@@ -447,8 +473,7 @@ public:
                         }
                     }
                     
-                    printf("DEBUG(%d)  recv_cnt: %d %d   send_cnt: %d %d\n", rank, recv_cnt[0], recv_cnt[1],send_cnt[0],send_cnt[1]);
-
+                    if (iter > 0)   printf("DEBUG(%d)  recv_cnt: %d %d   send_cnt: %d %d\n", rank, recv_cnt[0], recv_cnt[1],send_cnt[0],send_cnt[1]);
 
                     // Additional code for centroidal vertices.
                     if(dim==3)
@@ -468,16 +493,17 @@ public:
                         }
                     }
 
-                    MPI_Barrier(MPI_COMM_WORLD);
-                    exit(37);
 
-                    _mesh->print_halo("Before refine update_gappy_global_numbering");
+//                    if (iter >0) _mesh->print_halo("Before refine update_gappy_global_numbering");
+
+//                    MPI_Barrier(MPI_COMM_WORLD);
+//                    if (iter>0) exit(137);  
 
                     // Update global numbering
                     _mesh->update_gappy_global_numbering(recv_cnt, send_cnt);
-                    
-                    MPI_Barrier(MPI_COMM_WORLD);
-                    exit(35);
+                  
+//                    MPI_Barrier(MPI_COMM_WORLD);
+//                    exit(35);
 
                     // Now that the global numbering has been updated, update send_map and recv_map.
                     for(int i=0; i<nprocs; ++i)
@@ -504,9 +530,12 @@ public:
                     _mesh->trim_halo();
                 }
             }
+
+            _mesh->print_halo("At the end of refine");
             
             MPI_Barrier(MPI_COMM_WORLD);
-            exit(36);
+            exit(123);
+            if (iter>0) exit(37);
 
 #if !defined NDEBUG
             if(dim==2) {
