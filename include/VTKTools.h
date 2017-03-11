@@ -145,9 +145,10 @@ public:
                 nloc = 4;
                 ndims = 3;
             } else {
-                std::cerr<<"ERROR("<<__FILE__<<"): unsupported element type\n";
+                std::cerr<<"ERROR("<<__FILE__<<"): unsupported element type: \n" << cell_type;
                 exit(-1);
             }
+
 
             x.reserve(NNodes);
             y.reserve(NNodes);

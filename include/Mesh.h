@@ -1459,6 +1459,7 @@ private:
             msize = 6;
         }
 
+
         // From the (local) ENList, create the halo.
 #ifdef HAVE_BOOST_UNORDERED_MAP_HPP
         boost::unordered_map<index_t, index_t> gnn2lnn;
@@ -1479,9 +1480,59 @@ private:
                 owner_range[i]+=owner_range[i-1];
             }
             printf("DEBUG(%d)  NPNodes: %d, owner_range: %d %d %d\n", rank, NPNodes, owner_range[0], owner_range[1], owner_range[2]);
+
+
+            // ==================================================================================================
+            // ==================================================================================================
+            // ==================================================================================================
+
+    
+            int vertex_owner[3];
+            std::vector<std::set<int>> send_elm() 
+            for ( iElm = 0; iElm < NElements; ++iElm ) {
+
+                for (i = 0; i < nloc; ++i ) {
+                    index_t gnn = lnn2gnn[ENList[iElm*nloc+i]];
+                    for(int j=0; j<num_processes; j++) {
+                        if(gnn<owner_range[j+1]) {
+                            vertex_owner[i] = j;
+                            if(j!=rank)
+                                send_elm[iElm].insert(j)
+                                // je dois envoyer Elm[iElm] sur le proc j
+                                // je dois envoyer les sommets qui n'appartiennent pas à j sur j
+                            break;
+                        }
+                    }
+                }
+                
+                for (i = 0; i < nloc; ++i ) {
+                    owner = vertex_owner[i];
+                    if (owner != rank)
+                        send_elm[iElm].insert[owner]
+                }    
+
+            }
+
+
+    
+
+            // ==================================================================================================
+            // ==================================================================================================
+            // ==================================================================================================
+
+
+
+
+
+
+
+
+
+
+
             
             std::vector< std::set<index_t> > recv_set(num_processes);
-            for(size_t i=0; i<(size_t)NElements*nloc; i++) {
+            for(size_t i=0; i<(size_t)NElements*nloc; i++) { // TODO why loop over elements when you can loop over the vertices ?
                 index_t lnn = ENList[i];
                 index_t gnn = lnn2gnn[lnn];
                 for(int j=0; j<num_processes; j++) {
@@ -1544,13 +1595,6 @@ private:
                     index_t lnn = gnn2lnn[gnn];
                     send_map[j][gnn] = lnn;
                     send[j][k] = lnn;
-                    std::map<index_t, std::set<int>>::iterator it=halo_shared.find(lnn);
-                    if (it != halo_shared.end()) 
-                        it->second.insert(j);
-                    else {
-                        std::set<int> procs({j});
-                        halo_shared[lnn] = procs;
-                    }
                 }
             }
 
@@ -1722,14 +1766,6 @@ private:
         for (int i=0; i<node_owner.size();++i)
             printf("  %d->%d", i, node_owner[i]);
         printf("\n");
-        printf("DEBUG(%d)  halo_shared:\n", rank);
-        for (std::map<index_t,std::set<int>>::const_iterator it=halo_shared.begin(); it!=halo_shared.end(); ++it){
-            printf("DEBUG(%d)           %d ->", rank, it->first);
-            for (std::set<int>::const_iterator it2=it->second.begin(); it2!=it->second.end(); ++it2)
-                printf("  %d", *it2);
-            printf("\n");
-        }
-
     }
 
 
@@ -1785,7 +1821,6 @@ private:
 
         // Traverse all vertices V in all recv[i] vectors. Vertices in send[i] belong by definition to *this* MPI process,
         // so all elements adjacent to them either belong exclusively to *this* process or cross partitions.
-        // TODO somewheer update halo_shared...
         for(int i=0; i<num_processes; i++) {
             if(recv[i].size()==0)
                 continue;
@@ -2007,20 +2042,7 @@ private:
         }
 
         std::vector<MPI_Status> status(num_processes*2);
-/*        int rank = get_rank();
-        if (rank == 0) {
-            MPI_Wait(&request[0], &status[0]);
-            MPI_Wait(&request[1], &status[1]);
-            MPI_Wait(&request[2], &status[2]);
-            MPI_Wait(&request[3], &status[3]);
-        }
-        if (rank == 1) {
-            MPI_Wait(&request[0], &status[0]);
-            MPI_Wait(&request[1], &status[1]);
-            MPI_Wait(&request[2], &status[2]);
-            MPI_Wait(&request[3], &status[3]);
-        }
-*/
+
         MPI_Waitall(num_processes, &(request[0]), &(status[0]));        
         MPI_Waitall(num_processes, &(request[num_processes]), &(status[num_processes]));
 
@@ -2103,8 +2125,6 @@ private:
     std::set<index_t> send_halo, recv_halo;
     std::vector<int> node_owner;
     std::vector<index_t> lnn2gnn;
-
-    std::map<index_t, std::set<int>> halo_shared; // Contains the list of procs on which halos vertices are shared
 
     index_t gnn_offset;
     MPI_Comm _mpi_comm;

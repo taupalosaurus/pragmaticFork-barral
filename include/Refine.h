@@ -424,15 +424,12 @@ public:
                                 // Find which processes see this vertex
                                 printf("DEBUG(%d)     I am a halo vertex\n",rank);
                                 std::set<int> processes;
-                                //for(typename std::vector<index_t>::const_iterator neigh=_mesh->NNList[vert->id].begin(); neigh!=_mesh->NNList[vert->id].end(); ++neigh) {
-                                //    const double * coords = _mesh->get_coords(*neigh);
+                                for(typename std::vector<index_t>::const_iterator neigh=_mesh->NNList[vert->id].begin(); neigh!=_mesh->NNList[vert->id].end(); ++neigh) {
+                                    const double * coords = _mesh->get_coords(*neigh);
                                 //    printf("DEBUG(%d)       neighbor:  %d, coords: %1.2f %1.2f   owned by: %d\n",
                                 //            rank, *neigh, coords[0], coords[1], _mesh->node_owner[*neigh]);
-                                //    processes.insert(_mesh->node_owner[*neigh]);
-                                //}
-                                std::set_intersection(_mesh->halo_shared[vert->edge.first].begin(), _mesh->halo_shared[vert->edge.first].end(),
-                                                      _mesh->halo_shared[vert->edge.second].begin(), _mesh->halo_shared[vert->edge.second].end(), 
-                                                      std::inserter(processes, processes.begin()));
+                                    processes.insert(_mesh->node_owner[*neigh]);
+                                }
 
                                 processes.erase(rank);
                                 
@@ -445,7 +442,6 @@ public:
                                     DirectedEdge<index_t> gnn_edge(_mesh->lnn2gnn[vert->edge.first], _mesh->lnn2gnn[vert->edge.second], vert->id);
                                     send_additional[*proc].insert(gnn_edge);
                                 }
-                                _mesh->halo_shared[vert->id] = processes;
                             }
                         }
                     }
