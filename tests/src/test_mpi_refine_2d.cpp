@@ -76,19 +76,39 @@ int main(int argc, char **argv)
     size_t NNodes = mesh->get_number_nodes();
 
     std::vector<double> psi(NNodes);
-    for(size_t i=0; i<NNodes; i++)
-        psi[i] = pow(mesh->get_coords(i)[0], 4) + pow(mesh->get_coords(i)[1], 4);
+    double hmax=0.5,hmin=0.05;
+    for(size_t i=0; i<NNodes; i++){
+        double h = hmax*fabs(1-exp(-fabs(mesh->get_coords(i)[0]-0.5))) + hmin;
+        double lbd = 1/(h*h);
+        double lmax = 1/(hmax*hmax);
+        psi[i] = lbd;//pow(mesh->get_coords(i)[0], 4) + pow(mesh->get_coords(i)[1], 4);
+    }
 
-    metric_field.add_field(&(psi[0]), 0.0001);
+    metric_field.add_field(&(psi[0]), 1/(hmax*hmax));//0.0001);
     metric_field.update_mesh();
 
     VTKTools<double>::export_vtu("../data/test_mpi_refine_2d_init", mesh);
+        
+    for (int iVer=0; iVer<mesh->get_number_nodes(); ++iVer){
+      const double * coords = mesh->get_coords(iVer);
+      printf("DEBUG(%d)  vertex[%d (%d)]  %1.2f %1.2f\n", rank, iVer, mesh->get_globalNodeNumbering(iVer), coords[0], coords[1]);
+    }
+    
+    for (int iTri=0; iTri<mesh->get_number_elements(); ++iTri){
+        const int * tri = mesh->get_element(iTri);
+        printf("DEBUG(%d)  triangle[%d]  %d %d %d\n", rank, iTri, tri[0], tri[1], tri[2]);
+    }
+    
+    for (int iVer=0; iVer<mesh->get_number_nodes(); ++iVer){
+        const double * met = mesh->get_metric(iVer);
+        printf("DEBUG(%d)  metric[%d]  %1.2f %1.2f %1.2f\n", rank, iVer, met[0], met[1], met[2]);
+    }
 
     Refine<double,2> adapt(*mesh);
 
     double tic = get_wtime();
     for(int i=0; i<3; i++)
-        adapt.refine(sqrt(2.0));
+        adapt.refine(sqrt(2.0), 0);
     double toc = get_wtime();
 
     if(!mesh->verify()) {

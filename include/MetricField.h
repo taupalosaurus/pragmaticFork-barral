@@ -51,6 +51,7 @@
 #include "MetricTensor.h"
 #include "Mesh.h"
 #include "ElementProperty.h"
+#include "HaloExchange.h"
 
 #include "generate_Steiner_ellipse_3d.h"
 
@@ -492,6 +493,10 @@ public:
             }
             _metric[i].set_metric(m);
         }
+        
+        // Halo update if parallel
+//        printf("DEBUG(%d)  coucou halo_update\n", _mesh->get_rank());
+//        halo_update<double, (dim==2?3:6)>(_mesh->get_mpi_comm(), _mesh->send, _mesh->recv, _mesh->metric);
     }
 
 
