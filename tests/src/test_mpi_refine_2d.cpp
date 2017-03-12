@@ -68,7 +68,7 @@ int main(int argc, char **argv)
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
 #ifdef HAVE_VTK
-    Mesh<double> *mesh=VTKTools<double>::import_vtu("../data/box10x10.vtu");
+    Mesh<double> *mesh=VTKTools<double>::import_vtu("../data/box2x2.vtu");
     mesh->create_boundary();
 
     MetricField<double,2> metric_field(*mesh);
@@ -103,6 +103,9 @@ int main(int argc, char **argv)
         const double * met = mesh->get_metric(iVer);
         printf("DEBUG(%d)  metric[%d]  %1.2f %1.2f %1.2f\n", rank, iVer, met[0], met[1], met[2]);
     }
+    
+    MPI_Barrier(MPI_COMM_WORLD);
+    exit(12);
 
     Refine<double,2> adapt(*mesh);
 

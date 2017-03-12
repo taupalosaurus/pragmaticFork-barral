@@ -188,6 +188,9 @@ public:
             }
 
             NNodes = x.size();
+            
+            for (int iVer = 0; iVer<NNodes; ++iVer) 
+                printf("DEBUG  vertex %d : %1.1f  %1.1f\n", iVer, x[iVer], y[iVer]);
 
             for(index_t i=0; i<NElements; i++) {
                 int ghost=0;
@@ -207,6 +210,9 @@ public:
                 }
             }
             NElements = ENList.size()/nloc;
+            
+            for (int iTri = 0; iTri<NElements; ++iTri) 
+                printf("DEBUG  triangle %d : %d %d %d\n", iTri, ENList[iTri*3], ENList[iTri*3+1], ENList[iTri*3+2]);
         }
 
         MPI_Bcast(&NNodes, 1, MPI_INDEX_T, 0, MPI_COMM_WORLD);
@@ -272,6 +278,13 @@ public:
                                     npart.data());
 #endif
             }
+            
+            std::cout << "epart on proc " << rank << "  ";
+            std::copy(epart.begin(), epart.end(), std::ostream_iterator<int>(std::cout, " "));
+            std::cout << "\n";
+            std::cout << "npart on proc " << rank << "  ";
+            std::copy(npart.begin(), npart.end(), std::ostream_iterator<int>(std::cout, " "));
+            std::cout << "\n";
 
             MPI_Bcast(epart.data(), NElements, MPI_INT, 0, MPI_COMM_WORLD);
             MPI_Bcast(npart.data(), NNodes, MPI_INT, 0, MPI_COMM_WORLD);

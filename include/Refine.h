@@ -242,20 +242,12 @@ public:
                     new_vertices_per_element[nedge*eid+edgeOffset] = vid;
                 }
 
-//                if (iter>0) {
-//                    printf("DEBUG(%d) first-scnd id: %d %d  vid: %d _mesh_>NNList[vid]: %p   NNlist.size: %d\n", 
-//                        rank, firstid, secondid, vid, &_mesh->NNList[vid], _mesh->NNList.size());
-//                }
-
 
                 /*
                  * Update NNList for newly created vertices. This has to be done here, it cannot be
                  * done during element refinement, because a split edge is shared between two elements
                  * and we run the risk that these updates will happen twice, once for each element.
                  */
-                //if (iter > 0 && i>1 && i<6 && rank == 0) continue ;
-//                _mesh->NNList[vid].reserve(1);
-                //if (iter > 0 && i>6 && rank == 1) continue ;
                 _mesh->NNList[vid].push_back(firstid);
                 _mesh->NNList[vid].push_back(secondid);
 
@@ -446,9 +438,6 @@ public:
                         }
                     }
 
-                    if (iter > 0) printf("DEBUG(%d)  send_additional.size(): %d  send_additional[1/2].size(): %d %d\n\n", rank,
-                                  send_additional.size(), send_additional[0].size(), send_additional[1].size());
-
 
                     // Append vertices in recv_additional and send_additional to recv and send.
                     // Mark how many vertices are added to each of these vectors.
@@ -469,8 +458,6 @@ public:
                         }
                     }
                     
-                    if (iter > 0)   printf("DEBUG(%d)  recv_cnt: %d %d   send_cnt: %d %d\n", rank, recv_cnt[0], recv_cnt[1],send_cnt[0],send_cnt[1]);
-
                     // Additional code for centroidal vertices.
                     if(dim==3)
                     {
@@ -489,18 +476,9 @@ public:
                         }
                     }
 
-
-//                    if (iter >0) _mesh->print_halo("Before refine update_gappy_global_numbering");
-
-//                    MPI_Barrier(MPI_COMM_WORLD);
-//                    if (iter>0) exit(137);  
-
                     // Update global numbering
                     _mesh->update_gappy_global_numbering(recv_cnt, send_cnt);
                   
-//                    MPI_Barrier(MPI_COMM_WORLD);
-//                    exit(35);
-
                     // Now that the global numbering has been updated, update send_map and recv_map.
                     for(int i=0; i<nprocs; ++i)
                     {
@@ -528,10 +506,6 @@ public:
             }
 
             _mesh->print_halo("At the end of refine");
-            
-            MPI_Barrier(MPI_COMM_WORLD);
-            exit(123);
-            if (iter>0) exit(37);
 
 #if !defined NDEBUG
             if(dim==2) {

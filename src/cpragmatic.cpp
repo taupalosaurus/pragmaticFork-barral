@@ -276,12 +276,10 @@ extern "C" {
           const double * coords = mesh->get_coords(iVer);
           printf("DEBUG(%d)  vertex[%d (%d)]  %1.2f %1.2f\n", rank, iVer, mesh->get_globalNodeNumbering(iVer), coords[0], coords[1]);
         }
-        
         for (int iTri=0; iTri<mesh->get_number_elements(); ++iTri){
             const int * tri = mesh->get_element(iTri);
             printf("DEBUG(%d)  triangle[%d]  %d %d %d\n", rank, iTri, tri[0], tri[1], tri[2]);
         }
-        
         for (int iVer=0; iVer<mesh->get_number_nodes(); ++iVer){
             const double * met = mesh->get_metric(iVer);
             printf("DEBUG(%d)  metric[%d]  %1.2f %1.2f %1.2f\n", rank, iVer, met[0], met[1], met[2]);
@@ -330,17 +328,13 @@ extern "C" {
                 L_max = mesh->maximal_edge_length();
 
                 MPI_Barrier(MPI_COMM_WORLD);
-                if (i>0) exit(34);
+                exit(34);
 
                 if(L_max>1.0 && (L_max-L_up)<0.01)
                     break;
             }
 
-                MPI_Barrier(MPI_COMM_WORLD);
-                exit(14);
-
             mesh->defragment();
-
 
             smooth.smart_laplacian(20);
             smooth.optimisation_linf(20);
