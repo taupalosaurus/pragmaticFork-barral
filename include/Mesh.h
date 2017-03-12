@@ -916,14 +916,8 @@ public:
       coarsened. */
     void defragment()
     {
-
-        MPI_Barrier(MPI_COMM_WORLD);
-        exit(22);
         // Discover which vertices and elements are active.
         std::vector<index_t> active_vertex_map(NNodes);
-
-        MPI_Barrier(MPI_COMM_WORLD);
-        exit(23);
 
         #pragma omp parallel for schedule(static)
         for(size_t i=0; i<NNodes; i++) {
@@ -936,9 +930,6 @@ public:
         std::vector<index_t> active_element;
 
         active_element.reserve(NElements);
-
-        MPI_Barrier(MPI_COMM_WORLD);
-        exit(24);
 
         std::map<index_t, std::set<int> > new_send_set, new_recv_set;
         for(size_t e=0; e<NElements; e++) {
@@ -996,9 +987,6 @@ public:
             active_vertex_map[i] = cnt++;
         }
 
-        MPI_Barrier(MPI_COMM_WORLD);
-        exit(25);
-
         // Renumber elements
         int active_nelements = active_element.size();
         std::map< std::set<index_t>, index_t > ordered_elements;
@@ -1033,9 +1021,6 @@ public:
         std::vector<double> defrag_metric(NNodes*msize);
         std::vector<int> defrag_boundary(NElements*nloc);
         std::vector<double> defrag_quality(NElements);
-
-        MPI_Barrier(MPI_COMM_WORLD);
-        exit(26);
 
         // This first touch is to bind memory locally.
         #pragma omp parallel
@@ -1084,8 +1069,6 @@ public:
         memcpy(&_coords[0], &defrag_coords[0], NNodes*ndims*sizeof(real_t));
         memcpy(&metric[0], &defrag_metric[0], NNodes*msize*sizeof(double));
 
-        MPI_Barrier(MPI_COMM_WORLD);
-        exit(27);
 
         // Renumber halo, fix lnn2gnn and node_owner.
         if(num_processes>1) {
@@ -1486,35 +1469,100 @@ private:
             // ==================================================================================================
             // ==================================================================================================
 
-    
-            int vertex_owner[3];
-            std::vector<std::set<int>> send_elm() 
-            for ( iElm = 0; iElm < NElements; ++iElm ) {
 
-                for (i = 0; i < nloc; ++i ) {
-                    index_t gnn = lnn2gnn[ENList[iElm*nloc+i]];
-                    for(int j=0; j<num_processes; j++) {
-                        if(gnn<owner_range[j+1]) {
-                            vertex_owner[i] = j;
-                            if(j!=rank)
-                                send_elm[iElm].insert(j)
-                                // je dois envoyer Elm[iElm] sur le proc j
-                                // je dois envoyer les sommets qui n'appartiennent pas à j sur j
+            std::vector<std::vector<index_t>> send_elements(num_processes);
+            std::vector<std::vector<index_t>> recv_elements(num_processes);
+            std::vector<std::vector<index_t>> send_vertices(num_processes);
+            std::vector<std::vector<index_t>> recv_vertices(num_processes);
+            
+            int owners[nloc];
+            std:set<int> send_procs;
+            index_t gnnElem[nloc];
+            index_t elem;
+            
+            for (iElm = 0; iElm < NElements; +=iElm) {
+                
+                elem = &ENList[iElm*nloc]
+                
+                for (i=0; i<nloc; ++i) {
+                    lnn = elem[i];
+                    gnn  = lnn2gnn[lnn];
+                    gnnElem[i] = gnn
+                    for (n=0; n<num_processes; ++n) {
+                        if (gnn<owner_range[n+1]){
+                            owners[i] = n;
                             break;
                         }
                     }
                 }
                 
-                for (i = 0; i < nloc; ++i ) {
-                    owner = vertex_owner[i];
-                    if (owner != rank)
-                        send_elm[iElm].insert[owner]
-                }    
-
+                for (i=0; i<nloc; ++i) {
+                    owner = owners[i];
+                    if (owner != rank) {
+                        if ( ! send_procs.count(owner) ) {
+                            send_procs.insert(owner);
+                            send_elements[owner].insert(send_elements[owner].end(), nloc, gnnElem);
+                        }
+                    }
+                }
+                
+                for (std::set<int>::const_iterator it=send_procs.begin(); send_it != procs.end(); ++it) {
+                    for (i=0; i<nloc; ++i) {
+                        if (owners[i] == rank )
+                            send_vertices[it].pushback(gnnElem[i]);
+                    }
+                }
+                
+            }
+            
+            
+            
+            std::vector<index_t> send_elements_size(num_processes);
+            std::vector<index_t> recv_elements_size(num_processes);
+            std::vector<index_t> send_vertices_size(num_processes);
+            std::vector<index_t> recv_vertices_size(num_processes);
+            
+            for (n=0; n<num_processes; ++n) {
+                send_elements_size = send_elements[n].size();
+                send_vertices_size = send_vertices[n].size();
+            }
+            MPI_Alltoall(send_elements_size.data(), 1, MPI_INT,
+                         recv_elements_size.data(), 1, MPI_INT, _mpi_comm);
+            MPI_Alltoall(send_vertices_size.data(), 1, MPI_INT,
+                         recv_vertices_size.data(), 1, MPI_INT, _mpi_comm);
+    
+    
+    
+            // Setup non-blocking receives
+            std::vector<MPI_Request> request(num_processes*4);
+            for(int i=0; i<num_processes; i++) {
+                if((i==rank)||(send_elements_size[i]==0)) {
+                    request[i] =  MPI_REQUEST_NULL;
+                    request[2*num_process+i] =  MPI_REQUEST_NULL;
+                } else {
+                    send_elements[i].resize(send_elements_size[i]);
+                    MPI_Irecv(&(send_elements[i][0]), send_elements_size[i], MPI_INDEX_T, i, 0, _mpi_comm, &(request[i]));
+                    send_vertices[i].resize(send_vertices_size[i]);
+                    MPI_Irecv(&(send_vertices[i][0]), send_vertices_size[i], MPI_INDEX_T, i, 0, _mpi_comm, &(request[2*num_processes+i]));
+                }
             }
 
+            // Non-blocking sends.
+            for(int i=0; i<num_processes; i++) {
+                if((i==rank)||(recv_size[i]==0)) {
+                    request[num_processes+i] =  MPI_REQUEST_NULL;
+                    request[3*num_process+i] =  MPI_REQUEST_NULL;
+                } else {
+                    MPI_Isend(&(recv_elements[i][0]), recv_elements_size[i], MPI_INDEX_T, i, 0, _mpi_comm, &(request[num_processes+i]));
+                    MPI_Isend(&(recv_vertices[i][0]), recv_vertices_size[i], MPI_INDEX_T, i, 0, _mpi_comm, &(request[3*num_processes+i]));
+                }
+            }
 
-    
+            std::vector<MPI_Status> status(num_processes*4);
+            MPI_Waitall(num_processes, &(request[0]), &(status[0]));
+            MPI_Waitall(num_processes, &(request[num_processes]), &(status[num_processes]));
+            MPI_Waitall(num_processes, &(request[2*num_processes]), &(status[2*num_processes]));
+            MPI_Waitall(num_processes, &(request[3*num_processes]), &(status[3*num_processes]));
 
             // ==================================================================================================
             // ==================================================================================================
@@ -1530,7 +1578,8 @@ private:
 
 
 
-            
+            // --- All nodes on current proc that belong to another proc j - ie whose gnn is not in
+            //     its owner_range, are put in rec_set[j]
             std::vector< std::set<index_t> > recv_set(num_processes);
             for(size_t i=0; i<(size_t)NElements*nloc; i++) { // TODO why loop over elements when you can loop over the vertices ?
                 index_t lnn = ENList[i];
@@ -1543,6 +1592,7 @@ private:
                     }
                 }
             }
+            // --- rec_set is copied into rec[j]
             std::vector<int> recv_size(num_processes);
             recv.resize(num_processes);
             recv_map.resize(num_processes);
@@ -1552,6 +1602,7 @@ private:
                 }
                 recv_size[j] = recv[j].size();
             }
+            // --- Exchange sizes of vertices to receive/send
             std::vector<int> send_size(num_processes);
             MPI_Alltoall(recv_size.data(), 1, MPI_INT,
                          send_size.data(), 1, MPI_INT, _mpi_comm);
