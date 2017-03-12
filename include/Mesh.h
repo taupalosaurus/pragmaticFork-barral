@@ -1450,6 +1450,13 @@ private:
         std::map<index_t, index_t> gnn2lnn;
 #endif
 
+        std::vector<index_t> ENList_extra;
+        std::vector<real_t>  x_extra;
+        std::vector<real_t>  y_extra;
+        std::vector<real_t>  z_extra;
+        int NElements_extra;
+        int NNodes_extra;
+
         if(num_processes>1) {
             assert(lnn2gnn!=NULL);
             for(size_t i=0; i<(size_t)NNodes; i++) {
@@ -1469,26 +1476,42 @@ private:
             // ==================================================================================================
             // ==================================================================================================
 
+            index_t lnn, gnn, owner;
 
             std::vector<std::vector<index_t>> send_elements(num_processes);
             std::vector<std::vector<index_t>> recv_elements(num_processes);
             std::vector<std::vector<index_t>> send_vertices(num_processes);
             std::vector<std::vector<index_t>> recv_vertices(num_processes);
+            std::vector<std::vector<real_t>> send_coordinates(num_processes);
+            std::vector<std::vector<real_t>> recv_coordinates(num_processes);
+            
+            // TODO on peut réserver des vecteurs de taille ~5% du nombre d'élements
+            
+            for (int i=0; i<num_processes; ++i){
+                send_elements[i].reserve(nloc*(5+0.02*NElements));
+                send_vertices[i].reserve(5+0.02*NElements);
+                send_coordinates[i].reserve(ndims*(5+0.02*NElements));
+            }
+            
+            // --- Prepare the elements and vertices to send to other procs:
+            //       - elements that have a vertex that does not belong to current proc (in ggn)
+            //       - vertices of that element that belong to current proc  (their gnn + coords)
             
             int owners[nloc];
-            std:set<int> send_procs;
+            std::set<int> send_procs;
             index_t gnnElem[nloc];
-            index_t elem;
+            const index_t * elem;
+            std::vector<std::set<index_t>> send_vertices_set(num_processes);
             
-            for (iElm = 0; iElm < NElements; +=iElm) {
+            for (int iElm = 0; iElm < NElements; ++iElm) {
                 
-                elem = &ENList[iElm*nloc]
+                elem = &ENList[iElm*nloc];
                 
-                for (i=0; i<nloc; ++i) {
+                for (int i=0; i<nloc; ++i) {
                     lnn = elem[i];
                     gnn  = lnn2gnn[lnn];
-                    gnnElem[i] = gnn
-                    for (n=0; n<num_processes; ++n) {
+                    gnnElem[i] = gnn;
+                    for (int n=0; n<num_processes; ++n) {
                         if (gnn<owner_range[n+1]){
                             owners[i] = n;
                             break;
@@ -1496,73 +1519,192 @@ private:
                     }
                 }
                 
-                for (i=0; i<nloc; ++i) {
+//                printf("DEBUG(%d)  iElm: %d, lnns: %d %d %d, owners: %d %d %d\n",rank, iElm,
+//                            elem[0], elem[1], elem[2], owners[0], owners[1], owners[2]);
+                
+                send_procs.clear();
+                for (int i=0; i<nloc; ++i) {
                     owner = owners[i];
                     if (owner != rank) {
                         if ( ! send_procs.count(owner) ) {
                             send_procs.insert(owner);
-                            send_elements[owner].insert(send_elements[owner].end(), nloc, gnnElem);
+                            send_elements[owner].insert(send_elements[owner].end(), gnnElem, gnnElem+nloc);
                         }
                     }
                 }
                 
-                for (std::set<int>::const_iterator it=send_procs.begin(); send_it != procs.end(); ++it) {
-                    for (i=0; i<nloc; ++i) {
-                        if (owners[i] == rank )
-                            send_vertices[it].pushback(gnnElem[i]);
+                for (std::set<int>::const_iterator it=send_procs.begin(); it != send_procs.end(); ++it) {
+                    for (int i=0; i<nloc; ++i) {
+                        if (owners[i] == rank ) {
+                            lnn = elem[i];
+                            if ( !send_vertices_set[*it].count(lnn) ) {
+                                send_vertices_set[*it].insert(lnn);
+                                send_vertices[*it].push_back(gnnElem[i]);
+                                send_coordinates[*it].push_back(x[lnn]);
+                                send_coordinates[*it].push_back(y[lnn]);
+                                if (ndims==3) send_coordinates[*it].push_back(z[lnn]);
+                            }
+                        }
                     }
                 }
                 
             }
             
+/*            printf("DEBUG(%d)   send_vertices:\n", rank);
+            for (int n=0; n<num_processes; ++n){
+                printf("DEBUG(%d)                 -> %d", rank, n);
+                for (int i=0;i<send_vertices[n].size(); ++i)
+                    printf("  %d",send_vertices[n][i]);
+                printf("\n");
+            }
+            printf("DEBUG(%d)   send_coordinates:\n", rank);
+            for (int n=0; n<num_processes; ++n){
+                printf("DEBUG(%d)                    -> %d", rank, n);
+                for (int i=0;i<send_vertices[n].size(); ++i)
+                    printf("   %1.1f %1.1f", send_coordinates[n][2*i], send_coordinates[n][2*i+1]);
+                printf("\n");
+            }
+            printf("DEBUG(%d)   send_elements:\n", rank);
+            for (int n=0; n<num_processes; ++n){
+                printf("DEBUG(%d)                 -> %d", rank, n);
+                for (int i=0;i<send_elements[n].size()/3; ++i)
+                    printf("   %d %d %d", send_elements[n][3*i], send_elements[n][3*i+1], send_elements[n][3*i+2]);
+                printf("\n");
+            }
             
+            
+            MPI_Barrier(_mpi_comm);
+            exit(59);
+*/
+            
+            // --- Make the communications: exchange sizes of buffers, then exchange actual buffers
             
             std::vector<index_t> send_elements_size(num_processes);
             std::vector<index_t> recv_elements_size(num_processes);
             std::vector<index_t> send_vertices_size(num_processes);
             std::vector<index_t> recv_vertices_size(num_processes);
             
-            for (n=0; n<num_processes; ++n) {
-                send_elements_size = send_elements[n].size();
-                send_vertices_size = send_vertices[n].size();
+            for (int i=0; i<num_processes; ++i) {
+                send_elements_size[i] = send_elements[i].size();
+                send_vertices_size[i] = send_vertices[i].size();
             }
-            MPI_Alltoall(send_elements_size.data(), 1, MPI_INT,
-                         recv_elements_size.data(), 1, MPI_INT, _mpi_comm);
-            MPI_Alltoall(send_vertices_size.data(), 1, MPI_INT,
-                         recv_vertices_size.data(), 1, MPI_INT, _mpi_comm);
-    
-    
-    
+            
+            
+            MPI_Alltoall(send_elements_size.data(), 1, MPI_INT, recv_elements_size.data(), 1, MPI_INT, _mpi_comm);
+            MPI_Alltoall(send_vertices_size.data(), 1, MPI_INT, recv_vertices_size.data(), 1, MPI_INT, _mpi_comm);
+            
+//            printf("DEBUG(%d)  send_elements_size: %d %d %d %d  recv_elements_size: %d %d %d %d   send_vertices_size: %d %d %d %d   recv_vertices_size: %d %d %d %d\n", rank,
+//                send_elements_size[0]/3, send_elements_size[1]/3, send_elements_size[2]/3, send_elements_size[3]/3,
+//                recv_elements_size[0]/3, recv_elements_size[1]/3, recv_elements_size[2]/3, recv_elements_size[3]/3,
+//                send_vertices_size[0], send_vertices_size[1], send_vertices_size[2], send_vertices_size[3],
+//                recv_vertices_size[0], recv_vertices_size[1], recv_vertices_size[2], recv_vertices_size[3]);
+                
+                
             // Setup non-blocking receives
-            std::vector<MPI_Request> request(num_processes*4);
+            std::vector<MPI_Request> request(num_processes*6);
             for(int i=0; i<num_processes; i++) {
-                if((i==rank)||(send_elements_size[i]==0)) {
+                if((i==rank)||(recv_elements_size[i]==0)) {
                     request[i] =  MPI_REQUEST_NULL;
-                    request[2*num_process+i] =  MPI_REQUEST_NULL;
+                    request[2*num_processes+i] =  MPI_REQUEST_NULL;
+                    request[4*num_processes+i] =  MPI_REQUEST_NULL;
                 } else {
-                    send_elements[i].resize(send_elements_size[i]);
-                    MPI_Irecv(&(send_elements[i][0]), send_elements_size[i], MPI_INDEX_T, i, 0, _mpi_comm, &(request[i]));
-                    send_vertices[i].resize(send_vertices_size[i]);
-                    MPI_Irecv(&(send_vertices[i][0]), send_vertices_size[i], MPI_INDEX_T, i, 0, _mpi_comm, &(request[2*num_processes+i]));
+                    recv_elements[i].resize(recv_elements_size[i]);
+                    MPI_Irecv(&(recv_elements[i][0]), recv_elements_size[i], MPI_INDEX_T, i, 0, _mpi_comm, &(request[i]));
+                    recv_vertices[i].resize(recv_vertices_size[i]);
+                    MPI_Irecv(&(recv_vertices[i][0]), recv_vertices_size[i], MPI_INDEX_T, i, 0, _mpi_comm, &(request[2*num_processes+i]));
+                    recv_coordinates[i].resize(ndims*recv_vertices_size[i]);
+                    MPI_Irecv(&(recv_coordinates[i][0]), ndims*recv_vertices_size[i], MPI_REAL_T, i, 0, _mpi_comm, &(request[4*num_processes+i]));      
                 }
             }
-
             // Non-blocking sends.
             for(int i=0; i<num_processes; i++) {
-                if((i==rank)||(recv_size[i]==0)) {
+                if((i==rank)||(send_elements_size[i]==0)) {
                     request[num_processes+i] =  MPI_REQUEST_NULL;
-                    request[3*num_process+i] =  MPI_REQUEST_NULL;
+                    request[3*num_processes+i] =  MPI_REQUEST_NULL;
+                    request[5*num_processes+i] =  MPI_REQUEST_NULL;
                 } else {
-                    MPI_Isend(&(recv_elements[i][0]), recv_elements_size[i], MPI_INDEX_T, i, 0, _mpi_comm, &(request[num_processes+i]));
-                    MPI_Isend(&(recv_vertices[i][0]), recv_vertices_size[i], MPI_INDEX_T, i, 0, _mpi_comm, &(request[3*num_processes+i]));
+                    MPI_Isend(&(send_elements[i][0]), send_elements_size[i], MPI_INDEX_T, i, 0, _mpi_comm, &(request[num_processes+i]));
+                    MPI_Isend(&(send_vertices[i][0]), send_vertices_size[i], MPI_INDEX_T, i, 0, _mpi_comm, &(request[3*num_processes+i]));
+                    MPI_Isend(&(send_coordinates[i][0]), ndims*send_vertices_size[i], MPI_REAL_T, i, 0, _mpi_comm, &(request[5*num_processes+i]));
                 }
             }
-
-            std::vector<MPI_Status> status(num_processes*4);
+            std::vector<MPI_Status> status(num_processes*6);
             MPI_Waitall(num_processes, &(request[0]), &(status[0]));
             MPI_Waitall(num_processes, &(request[num_processes]), &(status[num_processes]));
             MPI_Waitall(num_processes, &(request[2*num_processes]), &(status[2*num_processes]));
             MPI_Waitall(num_processes, &(request[3*num_processes]), &(status[3*num_processes]));
+            MPI_Waitall(num_processes, &(request[4*num_processes]), &(status[4*num_processes]));
+            MPI_Waitall(num_processes, &(request[5*num_processes]), &(status[5*num_processes]));
+            
+            
+            // ---  Now the extra halo elements and nodes have been received, insert them in current node data
+            //      (if I'm correct, they cannot be already there)
+            
+            int numNewElm = 0;
+            int numNewVer = 0;
+            for(int i=0; i<num_processes; ++i) {
+                numNewElm += recv_elements[i].size();
+                numNewVer += recv_vertices[i].size();
+            }
+            
+            ENList_extra.reserve(numNewElm);
+            x_extra.reserve(numNewVer);
+            y_extra.reserve(numNewVer);
+            if (ndims == 3) z_extra.reserve(numNewVer);
+            
+            index_t lnnElem[nloc];
+            lnn = NNodes-1;
+            for(int i=0; i<num_processes; ++i) {
+                for (int iVer=0; iVer<recv_vertices[i].size(); ++iVer){
+                    lnn++;
+                    gnn2lnn[recv_vertices[i][iVer]] = lnn;
+                    x_extra.push_back(recv_coordinates[i][ndims*iVer]);
+                    y_extra.push_back(recv_coordinates[i][ndims*iVer+1]);
+                    if (ndims==3) z_extra.push_back(recv_coordinates[i][ndims*iVer+2]);
+                    
+//                    if (rank ==3)
+//                        printf("DEBUG(%d)  from proc %d, I have received vertex %1.1f %1.1f, gnn: %d, lnn: %d\n",rank, i,
+//                               recv_coordinates[i][ndims*iVer],recv_coordinates[i][ndims*iVer+1], recv_vertices[i][iVer], lnn);
+                }
+            }
+            for(int i=0; i<num_processes; ++i) {
+                for (int iElm=0; iElm<recv_elements[i].size()/nloc; ++iElm) {
+//                    if (rank ==3)
+//                        printf("DEBUG(%d)  from proc %d, I have received element %d %d %d\n",rank, i,
+//                               recv_elements[i][nloc*iElm], recv_elements[i][nloc*iElm+1], recv_elements[i][nloc*iElm+2]);
+                    for (int k=0; k<nloc; ++k) {
+                        assert ( gnn2lnn.count(recv_elements[i][nloc*iElm+k]) );
+                        lnnElem[k] = gnn2lnn[recv_elements[i][nloc*iElm+k]];
+                    }
+                    ENList_extra.insert(ENList_extra.end(), lnnElem, lnnElem+nloc);
+                }
+            }
+            NElements_extra = ENList_extra.size()/nloc;
+            NNodes_extra = x_extra.size();
+            
+//            printf("DEBUG(%d)  Nodes extra\n", rank);
+//            for (int iVer=0; iVer<NNodes_extra; ++iVer) 
+//                printf("DEBUG(%d)               lnn: %d  x,y: %1.1f  %1.1f\n", rank, iVer,x_extra[iVer], y_extra[iVer]);
+//            printf("DEBUG(%d)  ENList extra\n", rank);
+//            for (int iTri=0; iTri<NElements_extra; ++iTri) 
+//                printf("DEBUG(%d)                %d %d %d\n", rank, ENList_extra[3*iTri],ENList_extra[3*iTri+1],ENList_extra[3*iTri+2]);
+            
+            
+            request.clear();
+            status.clear();
+            send_elements_size.clear();
+            recv_elements_size.clear();
+            send_vertices_size.clear();
+            recv_vertices_size.clear();
+            send_elements.clear();
+            recv_elements.clear();
+            send_vertices.clear();
+            recv_vertices.clear();
+            send_coordinates.clear();
+            recv_coordinates.clear();
+            
+//            MPI_Barrier(_mpi_comm);
+//            exit(60);
 
             // ==================================================================================================
             // ==================================================================================================
@@ -1592,6 +1734,17 @@ private:
                     }
                 }
             }
+            for(size_t i=0; i<(size_t)NElements_extra*nloc; i++) { // TODO why loop over elements when you can loop over the vertices ?
+                index_t lnn = ENList_extra[i];
+                index_t gnn = lnn2gnn[lnn];
+                for(int j=0; j<num_processes; j++) {
+                    if(gnn<owner_range[j+1]) {
+                        if(j!=rank)
+                            recv_set[j].insert(gnn);
+                        break;
+                    }
+                }
+            }
             // --- rec_set is copied into rec[j]
             std::vector<int> recv_size(num_processes);
             recv.resize(num_processes);
@@ -1610,7 +1763,7 @@ private:
             // Setup non-blocking receives
             send.resize(num_processes);
             send_map.resize(num_processes);
-            std::vector<MPI_Request> request(num_processes*2);
+            request.resize(num_processes*2);
             for(int i=0; i<num_processes; i++) {
                 if((i==rank)||(send_size[i]==0)) {
                     request[i] =  MPI_REQUEST_NULL;
@@ -1629,7 +1782,7 @@ private:
                 }
             }
 
-            std::vector<MPI_Status> status(num_processes*2);
+            status.resize(num_processes*2);
             MPI_Waitall(num_processes, &(request[0]), &(status[0]));
             MPI_Waitall(num_processes, &(request[num_processes]), &(status[num_processes]));
 
@@ -1652,14 +1805,14 @@ private:
         }
 
 
-        _ENList.resize(NElements*nloc);
-        quality.resize(NElements);
-        _coords.resize(NNodes*ndims);
-        metric.resize(NNodes*msize);
-        NNList.resize(NNodes);
-        NEList.resize(NNodes);
-        node_owner.resize(NNodes);
-        this->lnn2gnn.resize(NNodes);
+        _ENList.resize((NElements+NElements_extra)*nloc);
+        quality.resize(NElements+NElements_extra);
+        _coords.resize((NNodes+NNodes_extra)*ndims);
+        metric.resize((NNodes+NNodes_extra)*msize);
+        NNList.resize((NNodes+NNodes_extra));
+        NEList.resize((NNodes+NNodes_extra));
+        node_owner.resize((NNodes+NNodes_extra));
+        this->lnn2gnn.resize((NNodes+NNodes_extra));
 
         // TODO I don't know whether this method makes sense anymore.
         // Enforce first-touch policy
@@ -1671,12 +1824,23 @@ private:
                     _ENList[i*nloc+j] = ENList[i*nloc+j];
                 }
             }
+            for(int i=0; i<(int)NElements_extra; i++) {
+                for(size_t j=0; j<nloc; j++) {
+                    _ENList[(i+NElements_extra)*nloc+j] = ENList_extra[i*nloc+j];
+                }
+            }
+            NElements += NElements_extra;
             if(ndims==2) {
                 #pragma omp for schedule(static)
                 for(int i=0; i<(int)NNodes; i++) {
                     _coords[i*2  ] = x[i];
                     _coords[i*2+1] = y[i];
                 }
+                for(int i=0; i<(int)NNodes_extra; i++) {
+                    _coords[(i+NNodes_extra)*2  ] = x_extra[i];
+                    _coords[(i+NNodes_extra)*2+1] = y_extra[i];
+                }
+                
             } else {
                 #pragma omp for schedule(static)
                 for(int i=0; i<(int)NNodes; i++) {
@@ -1684,7 +1848,19 @@ private:
                     _coords[i*3+1] = y[i];
                     _coords[i*3+2] = z[i];
                 }
+                for(int i=0; i<(int)NNodes_extra; i++) {
+                    _coords[(i+NNodes_extra)*2  ] = x_extra[i];
+                    _coords[(i+NNodes_extra)*2+1] = y_extra[i];
+                    _coords[(i+NNodes_extra)*2+2] = y_extra[i];
+                }
             }
+            NNodes += NNodes_extra;
+            
+            // TODO update metric on the halo
+            if (ndims==2)
+                halo_update<double, 3>(_mpi_comm, send, recv, metric);
+            else
+                halo_update<double, 6>(_mpi_comm, send, recv, metric);
 
             #pragma omp single nowait
             {
@@ -1762,7 +1938,10 @@ private:
         create_global_node_numbering();
 
 
-//        print_halo("End of Mesh::_init");
+        print_halo("End of Mesh::_init");
+        
+//        MPI_Barrier(_mpi_comm);
+//        exit(79);
         
 //        for (int iVer; iVer<NNodes; ++iVer){
 //            printf("DEBUG(%d)  After this->lnn2gnn[%d] : %d,    lnn2gnn : %d\n", rank, iVer, this->lnn2gnn[iVer], lnn2gnn[iVer]);

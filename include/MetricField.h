@@ -574,6 +574,9 @@ public:
     void update_mesh()
     {
         assert(_metric!=NULL);
+        
+        // necessary in case of dmplex that does not give the correct halo
+        halo_update<double, (dim==2?3:6)>(_mesh->get_mpi_comm(), _mesh->send, _mesh->recv, _mesh->metric);
 
         size_t pNElements = (size_t)predict_nelements_part();
 
