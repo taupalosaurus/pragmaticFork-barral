@@ -215,6 +215,7 @@ extern "C" {
       */
     void pragmatic_set_metric(const double *metric)
     {
+
         assert(_pragmatic_mesh!=NULL);
         assert(_pragmatic_metric_field==NULL);
 

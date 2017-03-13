@@ -280,6 +280,13 @@ public:
         assert(boundary.size()==0);
         create_boundary();
 
+        mpi_type_wrapper<index_t> mpi_index_t_wrapper;
+        MPI_INDEX_T = mpi_index_t_wrapper.mpi_type;
+
+
+        std::vector<std::vector<int>> send_facets(num_processes);
+        std::vector<std::vector<int>> recv_facets(num_processes);
+
         // Create a map of facets to ids.
         std::map< std::set<int>, int> facet2id;
         for(int i=0; i<nfacets; i++) {
@@ -289,12 +296,79 @@ public:
             }
             assert(facet2id.find(facet)==facet2id.end());
             facet2id[facet] = ids[i];
+
+            if (num_processes > 1){
+                for(int j=0; j<ndims; j++) {
+                    int owner = node_owner[facets[i*ndims+j]];
+                    if (owner != rank) {
+                        for (int k=0; k<ndims;++k)
+                            send_facets[owner].push_back(lnn2gnn[facets[i*ndims+k]]);
+                        send_facets[owner].push_back(ids[i]);   
+                    }
+                }
+            }
+
         }
+
+        if (num_processes > 1){
+
+            std::vector<int> send_facets_size(num_processes);
+            std::vector<int> recv_facets_size(num_processes);
+
+            for (int n=0; n<num_processes; ++n) 
+                send_facets_size[n] = send_facets[n].size();
+            MPI_Alltoall(send_facets_size.data(), 1, MPI_INT, recv_facets_size.data(), 1, MPI_INT, _mpi_comm);
+
+            std::vector<MPI_Request> request(num_processes*2);
+            for(int n=0; n<num_processes; n++) {
+                if((n==rank)||(recv_facets_size[n]==0)) {
+                    request[n] =  MPI_REQUEST_NULL;
+                } else {
+                    recv_facets[n].resize(recv_facets_size[n]);
+                    MPI_Irecv(&(recv_facets[n][0]), recv_facets_size[n], MPI_INDEX_T, n, 0, _mpi_comm, &(request[n]));
+                }
+            }
+            // Non-blocking sends.
+            for(int n=0; n<num_processes; n++) {
+                if((n==rank)||(send_facets_size[n]==0)) {
+                    request[num_processes+n] =  MPI_REQUEST_NULL;
+                } else {
+                    MPI_Isend(&(send_facets[n][0]), send_facets_size[n], MPI_INDEX_T, n, 0, _mpi_comm, &(request[num_processes+n]));
+                }
+            }
+            std::vector<MPI_Status> status(num_processes*2);
+            MPI_Waitall(num_processes, &(request[0]), &(status[0]));
+            MPI_Waitall(num_processes, &(request[num_processes]), &(status[num_processes]));
+
+            std::set<int> facet;
+            for (int n=0; n<num_processes; n++) {
+                for (int i = 0; i < recv_facets[n].size()/(ndims+1); ++i) {
+                    facet.clear();
+                    for(int j=0; j<ndims; j++) {
+                        int gnn = recv_facets[n][i*(ndims+1)+j];
+                        if (!recv_map[n].count(gnn)) exit(rank*10000+gnn);
+                        assert(recv_map[n].count(gnn));
+                        int lnn = recv_map[n][gnn];
+                        facet.insert(lnn);
+                    }
+                    assert(facet2id.find(facet)==facet2id.end());
+                    facet2id[facet] = recv_facets[n][i*(ndims+1)+ndims];
+                }
+            }
+
+        }
+
+                                MPI_Barrier(MPI_COMM_WORLD);
+        exit(80);
 
         // Sweep through boundary and set ids.
         size_t NElements = get_number_elements();
+        printf("DEBUG(%d)  NElements: %d \n", rank, NElements);
+        MPI_Barrier(MPI_COMM_WORLD);
         for(int i=0; i<NElements; i++) {
+            printf("DEBUG(%d)  i: %d \n", rank, i);
             for(int j=0; j<nloc; j++) {
+                printf("DEBUG(%d)    j: %d \n", rank, j);
                 if(boundary[i*nloc+j]==1) {
                     std::set<int> facet;
                     for(int k=1; k<nloc; k++) {
@@ -305,6 +379,9 @@ public:
                 }
             }
         }
+
+                                MPI_Barrier(MPI_COMM_WORLD);
+        exit(81);
     }
 
     void set_boundary(const int *_boundary)
@@ -1856,7 +1933,7 @@ private:
             }
             NNodes += NNodes_extra;
             
-            // TODO update metric on the halo
+            // TODO update metric on the halo: is it needed ?
             if (ndims==2)
                 halo_update<double, 3>(_mpi_comm, send, recv, metric);
             else

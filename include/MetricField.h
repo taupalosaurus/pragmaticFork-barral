@@ -496,7 +496,7 @@ public:
         
         // Halo update if parallel
 //        printf("DEBUG(%d)  coucou halo_update\n", _mesh->get_rank());
-//        halo_update<double, (dim==2?3:6)>(_mesh->get_mpi_comm(), _mesh->send, _mesh->recv, _mesh->metric);
+        halo_update<double, (dim==2?3:6)>(_mesh->get_mpi_comm(), _mesh->send, _mesh->recv, _mesh->metric);
     }
 
 
