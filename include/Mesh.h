@@ -289,6 +289,7 @@ public:
 
         // Create a map of facets to ids.
         std::map< std::set<int>, int> facet2id;
+        std::set<int> owners;
         for(int i=0; i<nfacets; i++) {
             std::set<int> facet;
             for(int j=0; j<ndims; j++) {
@@ -297,14 +298,19 @@ public:
             assert(facet2id.find(facet)==facet2id.end());
             facet2id[facet] = ids[i];
 
+            owners.clear();
             if (num_processes > 1){
                 for(int j=0; j<ndims; j++) {
                     int owner = node_owner[facets[i*ndims+j]];
-                    if (owner != rank) {
-                        for (int k=0; k<ndims;++k)
-                            send_facets[owner].push_back(lnn2gnn[facets[i*ndims+k]]);
-                        send_facets[owner].push_back(ids[i]);   
-                    }
+                    owners.insert(owner);
+                }
+                if (!owners.count(rank)) // this facet does not belong to this proc - even though the element does: weird! TODO BUG ?
+                    continue;
+                owners.erase(rank);
+                for (std::set<int>::const_iterator it=owners.begin(); it != owners.end(); ++it) {
+                    for (int k=0; k<ndims; ++k)
+                        send_facets[*it].push_back(lnn2gnn[facets[i*ndims+k]]);
+                    send_facets[*it].push_back(ids[i]);
                 }
             }
 
@@ -339,6 +345,10 @@ public:
             std::vector<MPI_Status> status(num_processes*2);
             MPI_Waitall(num_processes, &(request[0]), &(status[0]));
             MPI_Waitall(num_processes, &(request[num_processes]), &(status[num_processes]));
+            
+            fflush(stdout);
+            MPI_Barrier(MPI_COMM_WORLD);
+            
 
             std::set<int> facet;
             for (int n=0; n<num_processes; n++) {
@@ -346,29 +356,42 @@ public:
                     facet.clear();
                     for(int j=0; j<ndims; j++) {
                         int gnn = recv_facets[n][i*(ndims+1)+j];
-                        if (!recv_map[n].count(gnn)) exit(rank*10000+gnn);
-                        assert(recv_map[n].count(gnn));
-                        int lnn = recv_map[n][gnn];
+                        int lnn = -1;
+                        if (!recv_map[n].count(gnn)) {
+//                            assert(send_map[n].count(gnn));
+                            if (!send_map[n].count(gnn)) {
+                                printf("DEBUG(%d) le gnn fautif: %d, attendu du proc: %d\n", rank, gnn, n);
+                                exit(31);
+                            }
+                            lnn = send_map[n][gnn];
+                        }
+                        else 
+                            lnn = recv_map[n][gnn];
                         facet.insert(lnn);
                     }
-                    assert(facet2id.find(facet)==facet2id.end());
+                    int id = recv_facets[n][i*(ndims+1)+ndims];
+                    if (facet2id.find(facet)!=facet2id.end())
+                        if (facet2id[facet] != id)
+                            exit(45);
+//                    assert(facet2id.find(facet)==facet2id.end());
                     facet2id[facet] = recv_facets[n][i*(ndims+1)+ndims];
                 }
             }
 
         }
+        
+//        MPI_Barrier(MPI_COMM_WORLD);
+//        exit(80);
 
-                                MPI_Barrier(MPI_COMM_WORLD);
-        exit(80);
 
         // Sweep through boundary and set ids.
         size_t NElements = get_number_elements();
-        printf("DEBUG(%d)  NElements: %d \n", rank, NElements);
-        MPI_Barrier(MPI_COMM_WORLD);
+//        printf("DEBUG(%d)  NElements: %d \n", rank, NElements);
+//        MPI_Barrier(MPI_COMM_WORLD);
         for(int i=0; i<NElements; i++) {
-            printf("DEBUG(%d)  i: %d \n", rank, i);
+//            printf("DEBUG(%d)  i: %d \n", rank, i);
             for(int j=0; j<nloc; j++) {
-                printf("DEBUG(%d)    j: %d \n", rank, j);
+//                printf("DEBUG(%d)    j: %d \n", rank, j);
                 if(boundary[i*nloc+j]==1) {
                     std::set<int> facet;
                     for(int k=1; k<nloc; k++) {
@@ -380,8 +403,8 @@ public:
             }
         }
 
-                                MPI_Barrier(MPI_COMM_WORLD);
-        exit(81);
+//        MPI_Barrier(MPI_COMM_WORLD);
+//        exit(81);
     }
 
     void set_boundary(const int *_boundary)
@@ -1531,6 +1554,7 @@ private:
         std::vector<real_t>  x_extra;
         std::vector<real_t>  y_extra;
         std::vector<real_t>  z_extra;
+        std::vector<index_t> lnn2gnn_extra;
         int NElements_extra;
         int NNodes_extra;
 
@@ -1724,36 +1748,34 @@ private:
                 numNewVer += recv_vertices[i].size();
             }
             
-            ENList_extra.reserve(numNewElm);
-            x_extra.reserve(numNewVer);
-            y_extra.reserve(numNewVer);
-            if (ndims == 3) z_extra.reserve(numNewVer);
+            ENList_extra.resize(numNewElm);
+            x_extra.resize(numNewVer);
+            y_extra.resize(numNewVer);
+            if (ndims == 3) z_extra.resize(numNewVer);
+            lnn2gnn_extra.resize(numNewVer);
             
             index_t lnnElem[nloc];
-            lnn = NNodes-1;
+            int iVer_extra = 0;
             for(int i=0; i<num_processes; ++i) {
                 for (int iVer=0; iVer<recv_vertices[i].size(); ++iVer){
-                    lnn++;
-                    gnn2lnn[recv_vertices[i][iVer]] = lnn;
-                    x_extra.push_back(recv_coordinates[i][ndims*iVer]);
-                    y_extra.push_back(recv_coordinates[i][ndims*iVer+1]);
-                    if (ndims==3) z_extra.push_back(recv_coordinates[i][ndims*iVer+2]);
-                    
-//                    if (rank ==3)
-//                        printf("DEBUG(%d)  from proc %d, I have received vertex %1.1f %1.1f, gnn: %d, lnn: %d\n",rank, i,
-//                               recv_coordinates[i][ndims*iVer],recv_coordinates[i][ndims*iVer+1], recv_vertices[i][iVer], lnn);
+                    gnn = recv_vertices[i][iVer];
+                    gnn2lnn[gnn] = iVer_extra+NNodes;
+                    lnn2gnn_extra[iVer_extra] = gnn;
+                    x_extra[iVer_extra] = recv_coordinates[i][ndims*iVer];
+                    y_extra[iVer_extra] =recv_coordinates[i][ndims*iVer+1];
+                    if (ndims==3) z_extra[iVer_extra] = recv_coordinates[i][ndims*iVer+2];
+                    iVer_extra++;
                 }
             }
+            int iElm_extra = 0;
             for(int i=0; i<num_processes; ++i) {
                 for (int iElm=0; iElm<recv_elements[i].size()/nloc; ++iElm) {
-//                    if (rank ==3)
-//                        printf("DEBUG(%d)  from proc %d, I have received element %d %d %d\n",rank, i,
-//                               recv_elements[i][nloc*iElm], recv_elements[i][nloc*iElm+1], recv_elements[i][nloc*iElm+2]);
                     for (int k=0; k<nloc; ++k) {
                         assert ( gnn2lnn.count(recv_elements[i][nloc*iElm+k]) );
-                        lnnElem[k] = gnn2lnn[recv_elements[i][nloc*iElm+k]];
+                        lnn = gnn2lnn[recv_elements[i][nloc*iElm+k]];
+                        ENList_extra[nloc*iElm_extra+k] = lnn;
                     }
-                    ENList_extra.insert(ENList_extra.end(), lnnElem, lnnElem+nloc);
+                    iElm_extra++;
                 }
             }
             NElements_extra = ENList_extra.size()/nloc;
@@ -1761,7 +1783,7 @@ private:
             
 //            printf("DEBUG(%d)  Nodes extra\n", rank);
 //            for (int iVer=0; iVer<NNodes_extra; ++iVer) 
-//                printf("DEBUG(%d)               lnn: %d  x,y: %1.1f  %1.1f\n", rank, iVer,x_extra[iVer], y_extra[iVer]);
+//                printf("DEBUG(%d)               lnn: %d  gnn: %d  x,y: %1.1f  %1.1f\n", rank, NNodes+iVer, lnn2gnn_extra[iVer],x_extra[iVer], y_extra[iVer]);
 //            printf("DEBUG(%d)  ENList extra\n", rank);
 //            for (int iTri=0; iTri<NElements_extra; ++iTri) 
 //                printf("DEBUG(%d)                %d %d %d\n", rank, ENList_extra[3*iTri],ENList_extra[3*iTri+1],ENList_extra[3*iTri+2]);
@@ -1790,7 +1812,7 @@ private:
 
 
 
-
+            
 
 
 
@@ -1813,7 +1835,11 @@ private:
             }
             for(size_t i=0; i<(size_t)NElements_extra*nloc; i++) { // TODO why loop over elements when you can loop over the vertices ?
                 index_t lnn = ENList_extra[i];
-                index_t gnn = lnn2gnn[lnn];
+                index_t gnn;
+                if (lnn < NNodes)
+                    gnn = lnn2gnn[lnn];
+                else 
+                    gnn = lnn2gnn_extra[lnn-NNodes];
                 for(int j=0; j<num_processes; j++) {
                     if(gnn<owner_range[j+1]) {
                         if(j!=rank)
@@ -1903,7 +1929,7 @@ private:
             }
             for(int i=0; i<(int)NElements_extra; i++) {
                 for(size_t j=0; j<nloc; j++) {
-                    _ENList[(i+NElements_extra)*nloc+j] = ENList_extra[i*nloc+j];
+                    _ENList[(i+NElements)*nloc+j] = ENList_extra[i*nloc+j];
                 }
             }
             NElements += NElements_extra;
@@ -1914,8 +1940,8 @@ private:
                     _coords[i*2+1] = y[i];
                 }
                 for(int i=0; i<(int)NNodes_extra; i++) {
-                    _coords[(i+NNodes_extra)*2  ] = x_extra[i];
-                    _coords[(i+NNodes_extra)*2+1] = y_extra[i];
+                    _coords[(i+NNodes)*2  ] = x_extra[i];
+                    _coords[(i+NNodes)*2+1] = y_extra[i];
                 }
                 
             } else {
@@ -1926,13 +1952,13 @@ private:
                     _coords[i*3+2] = z[i];
                 }
                 for(int i=0; i<(int)NNodes_extra; i++) {
-                    _coords[(i+NNodes_extra)*2  ] = x_extra[i];
-                    _coords[(i+NNodes_extra)*2+1] = y_extra[i];
-                    _coords[(i+NNodes_extra)*2+2] = y_extra[i];
+                    _coords[(i+NNodes)*2  ] = x_extra[i];
+                    _coords[(i+NNodes)*2+1] = y_extra[i];
+                    _coords[(i+NNodes)*2+2] = y_extra[i];
                 }
             }
             NNodes += NNodes_extra;
-            
+                        
             // TODO update metric on the halo: is it needed ?
             if (ndims==2)
                 halo_update<double, 3>(_mpi_comm, send, recv, metric);
@@ -2015,7 +2041,7 @@ private:
         create_global_node_numbering();
 
 
-        print_halo("End of Mesh::_init");
+//        print_halo("End of Mesh::_init");
         
 //        MPI_Barrier(_mpi_comm);
 //        exit(79);
@@ -2322,7 +2348,7 @@ private:
         // MPI_Requests for all non-blocking communications.
         std::vector<MPI_Request> request(num_processes*2);
         
-        printf("DEBUG(%d)  recv_cnt: %d %d    send_cnt: %d %d\n", get_rank(), recv_cnt[0], recv_cnt[1], send_cnt[0], send_cnt[1]);
+//        printf("DEBUG(%d)  recv_cnt: %d %d    send_cnt: %d %d\n", get_rank(), recv_cnt[0], recv_cnt[1], send_cnt[0], send_cnt[1]);
 
         // Setup non-blocking receives.
         std::vector< std::vector<index_t> > recv_buff(num_processes);

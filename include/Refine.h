@@ -505,7 +505,7 @@ public:
                 }
             }
 
-            _mesh->print_halo("At the end of refine");
+//            _mesh->print_halo("At the end of refine");
 
 #if !defined NDEBUG
             if(dim==2) {
