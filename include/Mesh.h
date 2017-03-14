@@ -304,7 +304,7 @@ public:
                     int owner = node_owner[facets[i*ndims+j]];
                     owners.insert(owner);
                 }
-                if (!owners.count(rank)) // this facet does not belong to this proc - even though the element does: weird! TODO BUG ?
+                if (!owners.count(rank)) // this facet does not belong to this proc - even though the element does: TODO BUG ?
                     continue;
                 owners.erase(rank);
                 for (std::set<int>::const_iterator it=owners.begin(); it != owners.end(); ++it) {
@@ -1555,8 +1555,10 @@ private:
         std::vector<real_t>  y_extra;
         std::vector<real_t>  z_extra;
         std::vector<index_t> lnn2gnn_extra;
+        std::vector<bool>    delElementsTags;
         int NElements_extra;
         int NNodes_extra;
+        int numDelElm;
 
         if(num_processes>1) {
             assert(lnn2gnn!=NULL);
@@ -1604,6 +1606,9 @@ private:
             const index_t * elem;
             std::vector<std::set<index_t>> send_vertices_set(num_processes);
             
+            delElementsTags.resize(NElements*nloc, false);
+            numDelElm = 0;
+            
             for (int iElm = 0; iElm < NElements; ++iElm) {
                 
                 elem = &ENList[iElm*nloc];
@@ -1618,6 +1623,28 @@ private:
                             break;
                         }
                     }
+                }
+                
+                
+                // Remove elements that do not belong to the proc
+                //       ie if none of its vertices is owned by rank
+                //       since ENList cannot be touched, tag them in delElementsTags
+                //       they will be removed later when copied into _ENList
+                // That way, there still will be hanging nodes, but they won't even appier in the halo nor have neighbors
+                // Note that these elements can only be 
+                // This might cause a problem when doing smoothing ?
+                bool isOwned = false;
+                for (int i=0; i<nloc; ++i) {
+                    if (owners[i] == rank) {
+                        isOwned = true;
+                        break;
+                    }
+                }
+                if (!isOwned) {
+                    numDelElm++;
+                    for (int i=0; i<nloc; ++i)
+                        delElementsTags[iElm*nloc+i] = true;
+                    continue;   // TODO  really ?
                 }
                 
 //                printf("DEBUG(%d)  iElm: %d, lnns: %d %d %d, owners: %d %d %d\n",rank, iElm,
@@ -1808,10 +1835,12 @@ private:
             // ==================================================================================================
             // ==================================================================================================
             // ==================================================================================================
-
-
-
-
+            
+            
+//            printf("DEBUG(%d)   Number of deleted elements: %d\n", rank, numDelElm);
+//            MPI_Barrier(MPI_COMM_WORLD);
+//            exit(23);
+            
             
 
 
@@ -1824,6 +1853,7 @@ private:
             std::vector< std::set<index_t> > recv_set(num_processes);
             for(size_t i=0; i<(size_t)NElements*nloc; i++) { // TODO why loop over elements when you can loop over the vertices ?
                 index_t lnn = ENList[i];
+                if (delElementsTags[i]) continue;
                 index_t gnn = lnn2gnn[lnn];
                 for(int j=0; j<num_processes; j++) {
                     if(gnn<owner_range[j+1]) {
@@ -1908,8 +1938,8 @@ private:
         }
 
 
-        _ENList.resize((NElements+NElements_extra)*nloc);
-        quality.resize(NElements+NElements_extra);
+        _ENList.resize((NElements-numDelElm+NElements_extra)*nloc);
+        quality.resize(NElements-numDelElm+NElements_extra);
         _coords.resize((NNodes+NNodes_extra)*ndims);
         metric.resize((NNodes+NNodes_extra)*msize);
         NNList.resize((NNodes+NNodes_extra));
@@ -1924,6 +1954,7 @@ private:
             #pragma omp for schedule(static)
             for(int i=0; i<(int)NElements; i++) {
                 for(size_t j=0; j<nloc; j++) {
+                    if (delElementsTags[i*nloc+j]) continue;
                     _ENList[i*nloc+j] = ENList[i*nloc+j];
                 }
             }
@@ -1932,7 +1963,7 @@ private:
                     _ENList[(i+NElements)*nloc+j] = ENList_extra[i*nloc+j];
                 }
             }
-            NElements += NElements_extra;
+            NElements += NElements_extra - numDelElm;
             if(ndims==2) {
                 #pragma omp for schedule(static)
                 for(int i=0; i<(int)NNodes; i++) {
@@ -2041,7 +2072,7 @@ private:
         create_global_node_numbering();
 
 
-//        print_halo("End of Mesh::_init");
+        print_halo("End of Mesh::_init");
         
 //        MPI_Barrier(_mpi_comm);
 //        exit(79);

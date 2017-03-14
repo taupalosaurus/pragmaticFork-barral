@@ -112,17 +112,17 @@ extern "C" {
 
         _pragmatic_mesh = mesh;
         
-//       for (int iVer=0; iVer<mesh->get_number_nodes(); ++iVer){
-//         const double * coords = mesh->get_coords(iVer);
-//         printf("DEBUG(%d)  vertex[%d (%d)]  %1.2f %1.2f\n", mesh->get_rank(), iVer, mesh->get_globalNodeNumbering(iVer), coords[0], coords[1]);
-//       }
-// 
-//       for (int iTri=0; iTri<mesh->get_number_elements(); ++iTri){
-//           const int * tri = mesh->get_element(iTri);
-//           printf("DEBUG(%d) triangle[%d]  %d %d %d\n", mesh->get_rank(), iTri, tri[0], tri[1], tri[2]);
-//       }
-//       MPI_Barrier(MPI_COMM_WORLD);
-//       exit(35);
+       for (int iVer=0; iVer<mesh->get_number_nodes(); ++iVer){
+         const double * coords = mesh->get_coords(iVer);
+         printf("DEBUG(%d)  vertex[%d (%d)]  %1.2f %1.2f\n", mesh->get_rank(), iVer, mesh->get_globalNodeNumbering(iVer), coords[0], coords[1]);
+       }
+ 
+       for (int iTri=0; iTri<mesh->get_number_elements(); ++iTri){
+           const int * tri = mesh->get_element(iTri);
+           printf("DEBUG(%d) triangle[%d]  %d %d %d\n", mesh->get_rank(), iTri, tri[0], tri[1], tri[2]);
+       }
+       MPI_Barrier(MPI_COMM_WORLD);
+       exit(35);
     }
 
     /** Initialise pragmatic with mesh to be adapted. pragmatic_finalize must
